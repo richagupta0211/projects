@@ -1,0 +1,304 @@
+---
+title: "Lab1_RichaGupta"
+author: "Richa Gupta"
+date: "14/02/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("lmtest")
+#install.packages("car")
+#install.packages("mlogit")
+#install.packages("ordinal")
+#install.packages("nnet")
+library(nnet)
+library(ordinal)
+library(kableExtra)
+library(readr)
+library(dplyr)
+library(lmtest)
+library(car)
+library(mlogit)
+library(ggplot2)
+setwd(getwd())
+```
+
+## Question
+
+Run a multiple multinomial logistic regression. The outcome can be truly unordered or simply
+ordinal. Tell me how you think your independent variables will be related to your dependent
+variable. Interpret your results. Compare coefficients on your X variable of interest (not all of
+them) across different cuts of the multinomial outcomes, as we did in class (i.e., the Z test). For
+extra credit, generate some predicted probabilities. Tell me what you learned about your
+hypothesized relationship(s) from this exercise.
+
+## Hypothesis
+
+In India, what are the factors that affect life satisfaction- religion/ income levels/ social class/ education levels?
+```{r}
+data <- readxl::read_excel('WVS_India.xlsx')
+names(data) %>% print()
+dim(data)
+```
+The data has 4078 rows, some of the rows have missing data.
+Clean and recode the data
+```{r}
+unique(data$lifesatisfaction) %>% sort() %>% print()
+unique(data$children) %>% sort() %>% print()
+#8 or more children is upper capped at 8
+unique(data$religious) %>% sort() %>% print()
+unique(data$employment) %>% sort() #1,2,3 are employed
+unique(data$socialclass) %>% sort()
+unique(data$gender) #1 male, 2 female
+unique(data$yearofbirth) %>% sort()
+unique(data$education) %>% sort()
+```
+After preliminary data analysis, I have identified the values in different columns that need to be cleaned.
+
+```{r}
+data <- data %>% filter(lifesatisfaction != -2) %>% filter(children != -2) %>% filter(religious != -1) %>% filter(employment != -2 | employment != 8) %>% filter(socialclass != -1) %>% filter(gender != -5) %>% filter(yearofbirth != -2 | yearofbirth != -1) %>% filter(education != -2)
+```
+
+```{r}
+dim(data)
+```
+Now data has 3544 cleaned rows. But some of the variables have to be recoded.
+```{r recoding}
+#religious is coded the other way around
+#data %>% select(religious) %>% group_by(religious) %>% summarise(n())
+data$religious = 7 - data$religious
+#data %>% select(employment) %>% group_by(employment) %>% summarise(n())
+employed_list = c(1,2,3)
+#ifelse(data$employment %in% employed_list, data$employment = 1, data$employment = 0)
+#changing all employed to 1 and all not employed to 0
+for(i in 1:nrow(data)){
+  if(data$employment[i] %in% employed_list){
+    data$employment[i] = 1
+  } else {
+    data$employment[i] = 0
+  }
+}
+#social class is coded the other way around
+data$socialclass = 5 - data$socialclass
+data$gender = data$gender - 1 #male will become 0 and female will become 1
+#calculating age
+data$yearofbirth = 2020 - data$yearofbirth
+data$education = data$education - 1 # basing it at 0 instead of 1
+```
+Now the data has been cleaned and recoded.
+
+## Visualize the data
+
+```{r}
+ggplot(data = data, aes(x = lifesatisfaction)) + geom_histogram() + theme_minimal()
+```
+```{r}
+ggplot(data = data, aes(x = education)) + geom_histogram() + theme_minimal()
+```
+```{r}
+ggplot(data = data, aes(x = socialclass)) + geom_histogram() + theme_minimal()
+```
+
+Now running a simple OLS regression.
+```{r}
+lm1 <- lm(lifesatisfaction ~ children + religious + employment + socialclass + gender + yearofbirth + education, data)
+summary(lm1)
+```
+
+Coefficient on socialclass, education is positive and significant. 
+Implies that with increase in social class by one level the level of life satisfaction increases by 0.390. 
+With increase in education by one level the social class level increases by 0.088 levels. The R-squared of the model is 0.053 which is very small. The coefficient of yearofbirth is very small and statistically insignificant which means that yearofbirth is not explaining life satisfaction levels.
+
+```{r}
+bptest(lm1)
+```
+
+We can reject the null hypothesis of “homoskedasticity”
+
+```{r}
+coeftest(lm1, vcov = hccm(lm1))
+```
+Year of birth became slightly more significant than before.
+
+Let's add the interaction term of children with yearofbirth.
+```{r}
+lm2 <- lm(lifesatisfaction ~ children + religious + employment + socialclass + gender + yearofbirth + education + children*yearofbirth, data)
+summary(lm2)
+```
+This is interesting change of signs. Although having children and yearofbirth affect lifesatisfaction positively but for the same yearofbirth having more children affects the lifesatisfaction levels negatively. This implies that having children at a later age or having more children at a less age affects life satisfaction negatively holding other factors constant.
+
+Now let us try the ordinal logit model. Ordinal logit model is used for ordered dependent variable- life satisfaction.
+
+```{r}
+olm1 <- clm(as.factor(lifesatisfaction) ~ children + religious + employment + socialclass + gender + yearofbirth + education, data = data)
+summary(olm1)
+```
+
+For each increase in socialclass level the logit of lifesatisfaction at a higher category vs lower category increases by 0.303***
+For each increase in education level the logit of lifesatisfaction at a higher category vs lower category increases by 0.073***
+
+But here the slopes between different levels is different. A jump from 1 to 2 means different than a jump of 5 to 6.
+
+### Mlogit
+
+```{r}
+sort(unique(data$lifesatisfaction))
+```
+To run mlogit I am changing the levels of lifesatisfaction to 1, 2 and 3.
+
+1-4 will become 1
+5-7 will become 2
+8-10 will become 3
+
+```{r}
+data$lifesatisfaction[data$lifesatisfaction == 2 | data$lifesatisfaction == 3 | data$lifesatisfaction == 4] = 1 
+data$lifesatisfaction[data$lifesatisfaction == 5 | data$lifesatisfaction == 6 | data$lifesatisfaction == 7] = 2
+data$lifesatisfaction[data$lifesatisfaction == 8 | data$lifesatisfaction == 9 | data$lifesatisfaction == 10] = 3
+```
+Now that the variable is recoded lets do the Multiple Logistic Regerssion
+
+```{r}
+data1 = mlogit.data(data = data, varying=NULL, choice="lifesatisfaction", shape="wide")
+ml1 = mlogit(lifesatisfaction ~ 1 | children + religious + employment + socialclass + gender + yearofbirth + education, data = data1, reflevel="2")
+summary(ml1)
+```
+
+For each increase in social class, on average, the logit of being "Not too satisfied" (compared to being "satisfied") decreases by 0.159**
+For each increase in social class, on average, the logit of being “Very satisfied” (compared to being “satisfied”) increases by 0.308***
+
+For each level increase in education, on average, the logit of being "Not too satisfied" (compared to being "satisfied") decreases by 0.067**
+For each level increase in education, on average, the logit of being “Very satisfied” (compared to being “satisfied”) increases by 0.049**
+
+Let's conduct z-test to check if the slopes are the same or different.
+```{r}
+test.socialclass = ((0.15915-0.30799)^2)/(0.052249^2 + 0.042147^2)
+test.socialclass %>% print()
+pchisq(test.socialclass, df = 1, lower.tail = FALSE)
+```
+The value of pchisq is 0.0266 which is <0.05 indicates a strong evidence against the null hypothesis that the slopes are equal.
+
+This means that the 0.15915 != 0.30799.
+
+So |-0.15915| < |0.30799|
+
+```{r}
+test.education = ((0.067192-0.049068)^2)/(0.023673^2 + 0.017682^2)
+test.education %>% print()
+pchisq(test.education, df = 1, lower.tail = FALSE)
+```
+
+The value of pchisq is 0.5396238 which is >0.05 indicates a strong evidence for the null hypothesis that the slopes are equal.
+
+This means that the 0.067192 ~= 0.049068.
+
+So |0.067192| < |0.049068|
+
+### Mlogt another way
+
+```{r}
+mult1 = multinom(lifesatisfaction ~ children + religious + employment + socialclass + gender + yearofbirth + education, data = data)
+summary(mult1)
+```
+
+z-test again!
+```{r}
+z1 <- summary(mult1)$coefficients/summary(mult1)$standard.errors
+z1
+```
+
+```{r}
+#options(scipen=999) ## if you want to revert back, use options(scipen=0) 
+p1 <- (1 - pnorm(abs(z1), 0, 1))*2
+p1 %>% print()
+```
+
+```{r}
+# data frame of values to use for predictions
+data.predict <- expand.grid(
+  education = 1:9, #vary education from 1 to 6
+  yearofbirth = 30,  #fix age at the mean
+  children = 0, 
+  religious = 0, 
+  employment = 1, 
+  socialclass = 2, 
+  gender = 1)
+```
+
+Let's predict the lifesatisfaction when we change education. According to our analysis increase in education level should increase lifesatisfaction.
+
+```{r}
+preds.lifesatisfaction <- data.frame( 
+  education = data.predict$education, # education
+  predict(mult1, newdata = data.predict, type = "probs", se = TRUE)) # predicted probabilities
+
+preds.lifesatisfaction %>% print()
+```
+
+Here when the education level is 1 then the probability of life satisfaction being level 3 (very satisfied) is 0.3181216 and as the education level increases the probability of life satisfaction being level 3 (very satisfied) keeps increasing and is 0.4409347 when education level is 9.
+
+
+I will predict the life satisfaction by varying the social class as well.
+```{r}
+# data frame of values to use for predictions
+data.predict1 <- expand.grid(
+  education = 5, #fix at 5
+  yearofbirth = 30,  #fix age at the mean
+  children = 0, 
+  religious = 0, 
+  employment = 1, 
+  socialclass = 0:4, #varying from 0 to level 4 
+  gender = 1)
+```
+
+Let's predict the lifesatisfaction when we change social class According to our analysis increase in social class level should increase lifesatisfaction.
+
+```{r}
+preds.lifesatisfaction1 <- data.frame( 
+  socialclass = data.predict1$socialclass, # socialclass
+  predict(mult1, newdata = data.predict1, type = "probs", se = TRUE)) # predicted probabilities
+
+preds.lifesatisfaction1 %>% print()
+```
+
+This prediction also agrees with our hypothesis. When social class is 0 the probabolity of saying that a person is very satisfied with life is 0.2319808 and the highest probability is of saying that they are satisfied (the medium level) and when social class increases to 4 the same probability increases to 0.5478524. 
+
+
+### Sanity checks
+```{r}
+table(data$lifesatisfaction[data$socialclass == 0]) %>% print()
+table(data$lifesatisfaction[data$socialclass == 4]) %>% print()## sanity check, small-medium-large in precentages
+```
+
+### Predicting other models as well (Sanity checks)
+
+Here I am doing the prediction using the linear regression mmodel.
+
+```{r}
+predict(lm1, data.frame(education = 2, yearofbirth = 30, children = 0, religious = 0, employment = 1, socialclass = 3, gender = 0)) %>% print()
+
+#increasing the education level by 1
+predict(lm1, data.frame(education = 3, yearofbirth = 30, children = 0, religious = 0, employment = 1, socialclass = 3, gender = 0)) %>% print()
+```
+This model also shows that the level of life satisfaction has increased from 6.8 to 6.9 when education level was increased from 2 to 3.
+
+Here I am doing the prediction using the multinomial logit model. This is just to see the impact changing gender is having on the life satisfaction level. Females (gender = 1) have lower level of satisfaction than males keeping everything else constant in the model.
+
+```{r}
+predict(mult1, data.frame(education = 2, yearofbirth = 30, children = 0, religious = 0, employment = 1, socialclass = 3, gender = 1)) %>% print()
+```
+
+```{r}
+predict(mult1, data.frame(education = 2, yearofbirth = 30, children = 0, religious = 0, employment = 1, socialclass = 3, gender = 0)) %>% print()
+```
+Lets do the same thing for females by varying their education levels.
+
+```{r}
+predict(mult1, data.frame(education = 2, yearofbirth = 30, children = 0, religious = 0, employment = 1, socialclass = 3, gender = 1)) %>% print()
+```
+
+```{r}
+predict(mult1, data.frame(education = 4, yearofbirth = 30, children = 0, religious = 0, employment = 1, socialclass = 3, gender = 1)) %>% print()
+```
+
+Increasing the education by two levels and keeping everything else constant increased the level of happiness from 2 to 3.
