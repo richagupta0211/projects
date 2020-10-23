@@ -1,1 +1,18 @@
 theme: jekyll-theme-minimal
+
+# Dependencies
+
+# Permalinks
+permalink:        pretty
+
+
+# Setup
+title:            Richa Gupta's Website
+tagline:          ''
+description:      'Showcasing my projects' 
+
+
+paginate:         5
+
+# Custom vars
+version:          0.0.0
